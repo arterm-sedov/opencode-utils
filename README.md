@@ -21,10 +21,6 @@ Logs: `%LOCALAPPDATA%\OpenCode\serve-logs`
 
 Requires: PowerShell 7+, OpenCode installed (`npm i -g opencode-ai`)
 
-## Skills
-
-WIP. Skills for the OpenCode agent framework will be added here.
-
 ## License
 
 MIT — see [LICENSE](./LICENSE)
