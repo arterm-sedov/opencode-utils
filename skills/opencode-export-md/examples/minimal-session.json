@@ -1,0 +1,38 @@
+{
+  "info": {
+    "id": "ses_example",
+    "slug": "example",
+    "title": "Пример сессии",
+    "agent": "build",
+    "model": { "id": "minimax-m3", "providerID": "opencode-go", "variant": "default" },
+    "directory": "/tmp/example",
+    "version": "1.17.14"
+  },
+  "messages": [
+    {
+      "info": { "id": "msg_1", "role": "user", "time": { "created": 0 }, "agent": "build" },
+      "parts": [
+        { "type": "text", "text": "Привет! Покажи пример.", "id": "prt_1" }
+      ]
+    },
+    {
+      "info": { "id": "msg_2", "role": "assistant", "time": { "created": 1 }, "agent": "build", "modelID": "minimax-m3" },
+      "parts": [
+        { "type": "reasoning", "text": "Думаю, что делать.", "id": "prt_2a" },
+        { "type": "text", "text": "Вот пример ответа.", "id": "prt_2b" },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "id": "prt_2c",
+          "state": {
+            "status": "completed",
+            "input": { "command": "echo hi", "workdir": "/tmp" },
+            "output": "hi\n",
+            "title": "echo hi",
+            "metadata": { "exit": 0, "truncated": false }
+          }
+        }
+      ]
+    }
+  ]
+}

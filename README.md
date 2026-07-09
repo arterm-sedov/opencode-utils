@@ -40,6 +40,44 @@ Logs: `~/.local/share/opencode/serve-logs`
 
 Requires: Bash, OpenCode installed (`npm i -g opencode-ai`, `brew install opencode`, etc.)
 
+## Skills
+
+Skills live under `skills/<skill-name>/` following the
+[`skill-creator`](https://github.com/anomalyco/skill-creator) layout (one
+`SKILL.md` per skill, plus `scripts/`, `references/`, `examples/` as needed).
+They can be installed locally by symlinking the individual skill directory
+into `~/.agents/skills/`:
+
+```bash
+ln -sfn "$(pwd)/skills/opencode-export-md" ~/.agents/skills/opencode-export-md
+```
+
+| Skill | Purpose |
+| --- | --- |
+| [`skills/opencode-export-md/`](skills/opencode-export-md/SKILL.md) | Convert an `opencode export` JSON dump into a readable Markdown transcript. |
+
+## Layout
+
+```
+opencode-utils/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── scripts/                       # executable utilities
+│   ├── opencode-serve.ps1
+│   └── opencode-serve.sh
+└── skills/
+    └── opencode-export-md/        # self-contained skill
+        ├── SKILL.md
+        ├── scripts/
+        │   └── opencode-md.py
+        ├── references/
+        │   └── parts-and-sanitize.md
+        └── examples/
+            ├── minimal-session.json
+            └── minimal-session.md
+```
+
 ## License
 
 MIT — see [LICENSE](./LICENSE)
