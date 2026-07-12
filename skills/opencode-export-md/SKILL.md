@@ -74,15 +74,43 @@ opencode-md.py <input.json|-> [-o OUT.md] [--title TEXT]
 - `--title`: override the document title (defaults to `info.title` from the JSON).
 - Non-zero exit only on JSON parse error or unreadable input — the converter does not reject malformed messages, it just skips the bad ones.
 
+## Batch export
+
+A bulk-export script is available at `references/opencode-bulk-export.py`. It reads the opencode SQLite database directly, groups sessions by repository, and exports all sessions as dated Markdown files.
+
+```bash
+python3 ~/.agents/skills/opencode-export-md/references/opencode-bulk-export.py \
+    --output ~/repos/.agent-chats \
+    --repos-base ~/repos
+```
+
+Output structure:
+```
+~/repos/.agent-chats/
+├── my-project/
+│   ├── 20260709-1842-Some-session-title.md
+│   └── ...
+├── another-project/
+│   └── ...
+├── _home/
+│   └── ...
+└── ...
+```
+
+Options: `--output`, `--converter`, `--repos-base`, `--db`, `--tmp-dir`. See `--help` for defaults.
+
 ## Operational gotchas
 
+- **128 KB pipe buffer truncation.** `subprocess.run(capture_output=True)` silently truncates stdout at 128 KB. Sessions larger than this (common for long chats with tool calls) produce broken JSON. The fix: always use shell redirect (`opencode export <id> > file.json`) instead of capturing stdout. The bulk-export script does this automatically.
 - The script reads both files with a leading `Exporting session: ...` line and from raw stdin; the line is stripped before `json.loads`.
-- Tool outputs longer than 4 000 chars are truncated. If the user needs the full output, re-export and split the file, or post-process the JSON.
+- `opencode session list` filters by the current working directory. To see all sessions, query the SQLite database directly at `~/.local/share/opencode/opencode.db` (table: `session`).
+- Tool outputs longer than 4 000 chars are truncated in the Markdown output. If the user needs the full output, re-export and split the file, or post-process the JSON.
 - Reasoning blocks come back as `type: "reasoning"` parts; they are rendered as fenced code so they are visually distinct from regular prose.
 - File attachments (drag-and-drop, paste) appear as `type: "file"` parts with `filename` and `mime`. The Markdown output only lists the metadata; the bytes are not embedded.
 
 ## Related
 
-- `opencode session list` — list session IDs and titles.
+- `opencode session list` — list session IDs and titles (filtered to current directory).
 - `opencode export --help` — flag reference; the only flag the skill cares about is `--sanitize` (avoid unless redacted output is wanted).
 - `opencode-md` in `~/.local/bin/` is a symlink shortcut to `scripts/opencode-md.py` if installed; otherwise call the script by full path.
+- `references/opencode-bulk-export.py` — batch export all sessions from the SQLite database.
