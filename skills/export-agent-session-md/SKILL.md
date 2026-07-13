@@ -28,6 +28,37 @@ Do not use when:
 | **Aider** | Markdown `.aider.chat.history.md` | Direct file read |
 | **Codex CLI** | JSONL `~/.codex/sessions/**/rollout-*.jsonl` | Direct file read |
 | **Cline/Roo Code** | SQLite `~/.cline/data/sessions/` | Direct DB read |
+| **Cursor** | SQLite `~/.cursor/chats/*/store.db` | Direct DB read |
+
+## Automatic Sanitization
+
+**All exports are automatically sanitized** to remove secrets and sensitive data. The exported Markdown will include a warning header if any patterns were redacted.
+
+### What gets sanitized
+
+| Pattern | Replacement | Example |
+|---------|-------------|---------|
+| Private IPs | `192.168.x.x`, `10.x.x.x` | `192.168.1.100` → `192.168.x.x` |
+| VPN/Tailscale IPs | `100.x.x.x` | `100.98.142.108` → `100.x.x.x` |
+| SSH key paths | `id_KEY` | `id_rsa` → `id_KEY` |
+| Home directories | `/home/USER/` | `/home/alice/` → `/home/USER/` |
+| Usernames | `USER` | `alice-lnx` → `USER` |
+| API keys | `sk-REDACTED` | `sk-abc123...` → `sk-REDACTED` |
+| GitHub tokens | `ghp_REDACTED` | `ghp_abc123...` → `ghp_REDACTED` |
+| Private keys | `-----BEGIN REDACTED KEY-----` | Full key block redacted |
+| Passwords | `REDACTED` | `-p mypassword` → `-p REDACTED` |
+| Corp hostnames | `hostname.corp.example` | `server.corp.acme.com` → `hostname.corp.example` |
+
+### Example warning in exported file
+
+```markdown
+# Session Title
+
+> ⚠️ **Sanitized:** private IP (3 occurrences), username (2 occurrences), API key (1 occurrence)
+
+- **Session:** `ses_abc123`
+...
+```
 | **Cursor** | SQLite `~/.cursor/User/workspaceStorage/*/state.vscdb` | Direct DB read |
 
 ## Quick Start

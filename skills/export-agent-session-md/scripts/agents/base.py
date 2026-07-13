@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .sanitizer import sanitize
+
 
 @dataclass
 class SessionInfo:
@@ -81,7 +83,10 @@ class AgentAdapter(ABC):
         """Convert raw session data to the common format."""
 
     def export_markdown(self, session: NormalizedSession) -> str:
-        """Render a normalized session to Markdown (shared implementation)."""
+        """Render a normalized session to Markdown (shared implementation).
+
+        Automatically sanitizes secrets and adds a warning if any were found.
+        """
         out: list[str] = []
         title = session.title or f"{session.agent} session"
         out.append(f"# {title}")
@@ -94,6 +99,15 @@ class AgentAdapter(ABC):
             out.append(f"- **Directory:** `{session.directory}`")
         if session.created_at:
             out.append(f"- **Created:** {session.created_at}")
+
+        # Sanitize the full output
+        full_text = "\n".join(out)
+        result = sanitize(full_text)
+
+        if result.sanitized:
+            out.append("")
+            out.append(f"⚠️ **Sanitized:** {', '.join(result.replacements)}")
+
         out.append("")
 
         for msg in session.messages:
@@ -101,7 +115,22 @@ class AgentAdapter(ABC):
             if block:
                 out.append(block)
 
-        return "\n".join(out)
+        # Sanitize the complete output
+        final = "\n".join(out)
+        final_result = sanitize(final)
+
+        if final_result.sanitized:
+            # Prepend warning after title
+            lines = final_result.content.split("\n")
+            # Find the first empty line after title and insert warning
+            for i, line in enumerate(lines):
+                if line.startswith("# ") and i + 1 < len(lines):
+                    lines.insert(i + 2, "")
+                    lines.insert(i + 3, f"> ⚠️ **Sanitized:** {', '.join(final_result.replacements)}")
+                    break
+            return "\n".join(lines)
+
+        return final_result.content
 
     def _message_to_md(self, msg: NormalizedMessage) -> str:
         role_labels = {"user": "User", "assistant": "Assistant"}
