@@ -1,17 +1,20 @@
-"""Cursor adapter — VS Code AI chat sessions stored in SQLite VSCDB.
+"""Cursor adapter — AI chat sessions stored in SQLite.
 
-Cursor stores chat sessions in per-workspace SQLite databases:
-  ~/.cursor/User/workspaceStorage/<hash>/state.vscdb
+Cursor stores chat sessions in:
+  ~/.cursor/chats/<hash>/<session-uuid>/
 
-Chat data is stored as JSON blobs in ItemTable with key:
-  workbench.panel.aichat.view.aichat.chatdata
+Each session directory contains:
+  - meta.json: {"createdAtMs": ..., "updatedAtMs": ..., "hasConversation": ...}
+  - store.db: SQLite with blobs table (messages) and meta table (session name)
+  - prompt_history.json: Prompt history (optional)
 
-Message format:
-  {"role": "user"|"assistant", "message": {"content": [{"type": "text", "text": "..."}]}}
+Session name from store.db meta table (hex-encoded JSON):
+  {"name": "Session Title", "agentId": "...", ...}
 
-User messages may have XML wrapper:
-  <attached_files>...</attached_files>
-  <user_query>actual prompt</user_query>
+Message format in store.db blobs table:
+  {"role": "user"|"assistant", "content": "text"|"[{...}]"}
+
+Some sessions only have meta.json + prompt_history.json (no store.db).
 """
 
 from __future__ import annotations
@@ -35,126 +38,149 @@ from .base import (
 
 class CursorAdapter(AgentAdapter):
     name = "cursor"
-    _global_db = Path("~/.cursor/User/globalStorage/state.vscdb").expanduser()
-    _workspace_pattern = Path("~/.cursor/User/workspaceStorage/*/state.vscdb").expanduser()
+    _chats_base = Path("~/.cursor/chats").expanduser()
 
     def discover_sessions(self) -> list[SessionInfo]:
         sessions: list[SessionInfo] = []
 
-        # Scan all workspace databases
-        for db_path in sorted(self._workspace_pattern.parent.glob(self._workspace_pattern.name)):
-            workspace_id = db_path.parent.name
-            sessions.extend(self._scan_db(db_path, workspace_id))
+        if not self._chats_base.exists():
+            return sessions
 
-        return sessions
-
-    def _scan_db(self, db_path: Path, workspace_id: str) -> list[SessionInfo]:
-        """Extract session info from a single VSCDB file."""
-        if not db_path.exists():
-            return []
-
-        sessions: list[SessionInfo] = []
-        try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            cur = conn.cursor()
-
-            # Cursor stores chat data as JSON in ItemTable
-            cur.execute(
-                "SELECT value FROM ItemTable "
-                "WHERE key = 'workbench.panel.aichat.view.aichat.chatdata'"
-            )
-            rows = cur.fetchall()
-            conn.close()
-
-            for row in rows:
-                try:
-                    data = json.loads(row[0])
-                    if isinstance(data, dict):
-                        # Single chat session
-                        sessions.append(self._extract_session_info(data, db_path, workspace_id))
-                    elif isinstance(data, list):
-                        # Multiple chat sessions
-                        for item in data:
-                            if isinstance(item, dict):
-                                sessions.append(self._extract_session_info(item, db_path, workspace_id))
-                except (json.JSONDecodeError, KeyError):
+        # Find all session directories (UUID-named subdirs under hash dirs)
+        for hash_dir in sorted(self._chats_base.iterdir()):
+            if not hash_dir.is_dir():
+                continue
+            for session_dir in sorted(hash_dir.iterdir()):
+                if not session_dir.is_dir():
                     continue
-
-        except (sqlite3.Error, OSError):
-            pass
+                session_info = self._read_session_info(session_dir)
+                if session_info:
+                    sessions.append(session_info)
 
         return sessions
 
-    def _extract_session_info(self, data: dict, db_path: Path, workspace_id: str) -> SessionInfo:
-        """Extract session metadata from chat data."""
-        session_id = data.get("id") or data.get("chatId") or workspace_id
-        title = data.get("title") or data.get("name") or ""
+    def _read_session_info(self, session_dir: Path) -> SessionInfo | None:
+        """Read session metadata from directory."""
+        session_uuid = session_dir.name
+        store_db = session_dir / "store.db"
+        meta_json = session_dir / "meta.json"
+
+        name = "unknown"
+        has_store = store_db.exists()
+
+        # Try to get name from store.db meta table
+        if has_store:
+            try:
+                conn = sqlite3.connect(f"file:{store_db}?mode=ro", uri=True)
+                cur = conn.cursor()
+                cur.execute('SELECT value FROM meta WHERE key = "0"')
+                row = cur.fetchone()
+                conn.close()
+
+                if row:
+                    decoded = bytes.fromhex(row[0]).decode("utf-8")
+                    data = json.loads(decoded)
+                    name = data.get("name", "unknown")
+            except Exception:
+                pass
+
         return SessionInfo(
-            session_id=str(session_id),
-            title=title,
+            session_id=session_uuid,
+            title=name,
             agent="cursor",
-            file_path=db_path,
+            file_path=session_dir,
         )
 
     def read_session(self, session_id: str) -> RawSession:
-        """Read a session from the appropriate VSCDB database."""
-        # Try global DB first
-        if self._global_db.exists():
-            data = self._read_from_db(self._global_db, session_id)
-            if data is not None:
-                return RawSession(agent="cursor", session_id=session_id, raw_data=data)
+        """Read a session from its directory."""
+        # Find the session directory
+        for hash_dir in self._chats_base.iterdir():
+            if not hash_dir.is_dir():
+                continue
+            session_dir = hash_dir / session_id
+            if session_dir.exists():
+                messages = self._read_messages(session_dir)
+                info = self._read_session_info(session_dir)
+                return RawSession(
+                    agent="cursor",
+                    session_id=session_id,
+                    raw_data={
+                        "id": session_id,
+                        "name": info.title if info else "unknown",
+                        "messages": messages,
+                    },
+                )
 
-        # Search workspace databases
-        for db_path in sorted(self._workspace_pattern.parent.glob(self._workspace_pattern.name)):
-            data = self._read_from_db(db_path, session_id)
-            if data is not None:
-                return RawSession(agent="cursor", session_id=session_id, raw_data=data)
+        raise RuntimeError(f"Session {session_id} not found in Cursor chats")
 
-        raise RuntimeError(f"Session {session_id} not found in any Cursor database")
+    def _read_messages(self, session_dir: Path) -> list[dict]:
+        """Read messages from store.db or prompt_history.json."""
+        messages: list[dict] = []
 
-    def _read_from_db(self, db_path: Path, session_id: str) -> dict | None:
-        """Read chat data from a single database file."""
+        store_db = session_dir / "store.db"
+        if store_db.exists():
+            messages = self._read_from_store_db(store_db)
+
+        # Fallback to prompt_history.json if no store.db or empty
+        if not messages:
+            prompt_file = session_dir / "prompt_history.json"
+            if prompt_file.exists():
+                messages = self._read_from_prompt_history(prompt_file)
+
+        return messages
+
+    def _read_from_store_db(self, db_path: Path) -> list[dict]:
+        """Read messages from store.db blobs table."""
+        messages: list[dict] = []
+
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             cur = conn.cursor()
-
-            cur.execute(
-                "SELECT value FROM ItemTable "
-                "WHERE key = 'workbench.panel.aichat.view.aichat.chatdata'"
-            )
-            rows = cur.fetchall()
-            conn.close()
-
-            for row in rows:
+            cur.execute("SELECT data FROM blobs")
+            for row in cur.fetchall():
+                data = row[0]
+                if isinstance(data, bytes):
+                    try:
+                        data = data.decode("utf-8")
+                    except UnicodeDecodeError:
+                        continue
                 try:
-                    data = json.loads(row[0])
-                    if isinstance(data, dict):
-                        if str(data.get("id") or data.get("chatId") or "") == session_id:
-                            return data
-                    elif isinstance(data, list):
-                        for item in data:
-                            if isinstance(item, dict):
-                                if str(item.get("id") or item.get("chatId") or "") == session_id:
-                                    return item
-                except (json.JSONDecodeError, KeyError):
+                    parsed = json.loads(data)
+                    if isinstance(parsed, dict) and "role" in parsed:
+                        messages.append(parsed)
+                except (json.JSONDecodeError, TypeError):
                     continue
-
+            conn.close()
         except (sqlite3.Error, OSError):
             pass
 
-        return None
+        return messages
+
+    def _read_from_prompt_history(self, prompt_file: Path) -> list[dict]:
+        """Read messages from prompt_history.json."""
+        messages: list[dict] = []
+
+        try:
+            data = json.loads(prompt_file.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        # prompt_history entries are typically just prompts
+                        text = item.get("prompt") or item.get("text") or ""
+                        if text.strip():
+                            messages.append({"role": "user", "content": text})
+        except (json.JSONDecodeError, OSError):
+            pass
+
+        return messages
 
     def normalize(self, raw: RawSession) -> NormalizedSession:
-        data = raw.raw_data if isinstance(raw.raw_data, dict) else json.loads(raw.raw_data)
+        data = raw.raw_data if isinstance(raw.raw_data, dict) else {}
 
-        # Extract metadata
-        session_id = str(data.get("id") or data.get("chatId") or raw.session_id)
-        title = data.get("title") or data.get("name") or ""
-        model = data.get("model") or ""
-        created_at = data.get("createdAt") or data.get("createdAtTime") or ""
+        session_id = data.get("id", raw.session_id)
+        title = data.get("name", "unknown")
+        messages_data = data.get("messages", [])
 
-        # Normalize messages
-        messages_data = data.get("messages") or data.get("chatMessages") or []
         norm_messages = [_normalize_message(msg) for msg in messages_data]
         norm_messages = [m for m in norm_messages if m is not None]
 
@@ -162,9 +188,9 @@ class CursorAdapter(AgentAdapter):
             agent="cursor",
             id=session_id,
             title=title,
-            model=model,
-            directory=data.get("workspace") or "",
-            created_at=created_at,
+            model="",
+            directory="",
+            created_at="",
             messages=norm_messages,
         )
 
@@ -175,16 +201,16 @@ def _normalize_message(msg: dict) -> NormalizedMessage | None:
     if role not in ("user", "assistant"):
         return None
 
-    content_data = msg.get("message", {}).get("content", [])
+    content_data = msg.get("content", "")
 
-    # Handle string content (some versions)
+    # Handle string content
     if isinstance(content_data, str):
         text = _clean_user_content(content_data) if role == "user" else content_data
         if not text.strip():
             return None
         return NormalizedMessage(role=role, content=text)
 
-    # Handle array content
+    # Handle array content (content blocks)
     if not isinstance(content_data, list):
         return None
 
@@ -220,18 +246,15 @@ def _normalize_message(msg: dict) -> NormalizedMessage | None:
         role=role,
         content=content,
         tool_calls=tool_calls,
-        timestamp=msg.get("timestamp"),
     )
 
 
 def _clean_user_content(text: str) -> str:
     """Extract user_query from Cursor's XML wrapper, stripping attached_files."""
-    # Try to extract <user_query> content
     match = re.search(r"<user_query>\s*(.*?)</user_query>", text, re.DOTALL)
     if match:
         return match.group(1).strip()
 
-    # Strip <attached_files> blocks
     cleaned = re.sub(r"<attached_files>.*?</attached_files>", "", text, flags=re.DOTALL)
     cleaned = re.sub(r"<code_selection[^>]*>.*?</code_selection>", "", cleaned, flags=re.DOTALL)
 
