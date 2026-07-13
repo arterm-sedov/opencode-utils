@@ -1,5 +1,5 @@
 ---
-name: opencode-export-md
+name: export-agent-session-md
 description: Export AI coding agent sessions to Markdown. Supports OpenCode, MiMoCode, Claude Code, Aider, Codex, Cline, Cursor, and more. Use when the user asks to export any AI chat session, save conversations as Markdown, or share chat transcripts.
 ---
 
