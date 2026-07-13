@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .sanitizer import sanitize
+from .sanitizer import sanitize as sanitize_text
 
 
 @dataclass
@@ -82,10 +82,12 @@ class AgentAdapter(ABC):
     def normalize(self, raw: RawSession) -> NormalizedSession:
         """Convert raw session data to the common format."""
 
-    def export_markdown(self, session: NormalizedSession) -> str:
+    def export_markdown(self, session: NormalizedSession, do_sanitize: bool = True) -> str:
         """Render a normalized session to Markdown (shared implementation).
 
-        Automatically sanitizes secrets and adds a warning if any were found.
+        Args:
+            session: The normalized session to render.
+            do_sanitize: If True (default), automatically redact secrets and add warning.
         """
         out: list[str] = []
         title = session.title or f"{session.agent} session"
@@ -100,14 +102,6 @@ class AgentAdapter(ABC):
         if session.created_at:
             out.append(f"- **Created:** {session.created_at}")
 
-        # Sanitize the full output
-        full_text = "\n".join(out)
-        result = sanitize(full_text)
-
-        if result.sanitized:
-            out.append("")
-            out.append(f"⚠️ **Sanitized:** {', '.join(result.replacements)}")
-
         out.append("")
 
         for msg in session.messages:
@@ -115,22 +109,22 @@ class AgentAdapter(ABC):
             if block:
                 out.append(block)
 
-        # Sanitize the complete output
+        # Sanitize the complete output if requested
         final = "\n".join(out)
-        final_result = sanitize(final)
+        if do_sanitize:
+            result = sanitize_text(final)
+            if result.sanitized:
+                # Prepend warning after title
+                lines = result.content.split("\n")
+                for i, line in enumerate(lines):
+                    if line.startswith("# ") and i + 1 < len(lines):
+                        lines.insert(i + 2, "")
+                        lines.insert(i + 3, f"> ⚠️ **Sanitized:** {', '.join(result.replacements)}")
+                        break
+                return "\n".join(lines)
+            return result.content
 
-        if final_result.sanitized:
-            # Prepend warning after title
-            lines = final_result.content.split("\n")
-            # Find the first empty line after title and insert warning
-            for i, line in enumerate(lines):
-                if line.startswith("# ") and i + 1 < len(lines):
-                    lines.insert(i + 2, "")
-                    lines.insert(i + 3, f"> ⚠️ **Sanitized:** {', '.join(final_result.replacements)}")
-                    break
-            return "\n".join(lines)
-
-        return final_result.content
+        return final
 
     def _message_to_md(self, msg: NormalizedMessage) -> str:
         role_labels = {"user": "User", "assistant": "Assistant"}

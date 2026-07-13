@@ -45,7 +45,7 @@ def cmd_list(agent_name: str | None) -> int:
     return 0
 
 
-def cmd_export(agent_name: str, session_id: str, output: Path | None) -> int:
+def cmd_export(agent_name: str, session_id: str, output: Path | None, sanitize: bool = True) -> int:
     cls = get_adapter(agent_name)
     if cls is None:
         print(f"error: unknown agent '{agent_name}'", file=sys.stderr)
@@ -55,7 +55,7 @@ def cmd_export(agent_name: str, session_id: str, output: Path | None) -> int:
     adapter = cls()
     raw = adapter.read_session(session_id)
     normalized = adapter.normalize(raw)
-    md = adapter.export_markdown(normalized)
+    md = adapter.export_markdown(normalized, do_sanitize=sanitize)
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -67,7 +67,7 @@ def cmd_export(agent_name: str, session_id: str, output: Path | None) -> int:
     return 0
 
 
-def cmd_detect(file_path: Path, output: Path | None) -> int:
+def cmd_detect(file_path: Path, output: Path | None, sanitize: bool = True) -> int:
     agent_name = detect_agent(file_path)
     if agent_name is None:
         print("error: could not detect agent format", file=sys.stderr)
@@ -82,7 +82,7 @@ def cmd_detect(file_path: Path, output: Path | None) -> int:
     adapter = cls()
     raw = adapter.read_session(str(file_path))
     normalized = adapter.normalize(raw)
-    md = adapter.export_markdown(normalized)
+    md = adapter.export_markdown(normalized, do_sanitize=sanitize)
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +158,7 @@ def main() -> int:
     ap.add_argument("-o", "--output", type=Path, help="output path (file or directory)")
     ap.add_argument("--list", action="store_true", dest="list_sessions", help="list available sessions")
     ap.add_argument("--agents", action="store_true", help="list available adapters")
+    ap.add_argument("--no-sanitize", action="store_true", help="skip secret sanitization (exports raw content)")
 
     args = ap.parse_args()
 
@@ -175,7 +176,7 @@ def main() -> int:
         if not args.detect.is_file():
             print(f"error: {args.detect} not found", file=sys.stderr)
             return 1
-        return cmd_detect(args.detect, args.output)
+        return cmd_detect(args.detect, args.output, sanitize=not args.no_sanitize)
 
     # Bulk export
     if args.all:
@@ -187,7 +188,7 @@ def main() -> int:
         if not args.session:
             print("error: --session is required with --agent", file=sys.stderr)
             return 1
-        return cmd_export(args.agent, args.session, args.output)
+        return cmd_export(args.agent, args.session, args.output, sanitize=not args.no_sanitize)
 
     # Nothing specified
     ap.print_help()

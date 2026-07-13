@@ -91,6 +91,7 @@ python3 scripts/agent-export.py --agents
 ```
 agent-export.py [-h] [--agent AGENT | --detect FILE | --all]
                 [--session SESSION] [-o OUTPUT] [--list] [--agents]
+                [--no-sanitize]
 
 options:
   --agent AGENT         agent name (opencode, mimocode, claude-code, aider, codex, cline, cursor)
@@ -100,6 +101,19 @@ options:
   -o OUTPUT, --output OUTPUT  output path (file or directory)
   --list                list available sessions
   --agents              list available adapters
+  --no-sanitize         skip secret sanitization (exports raw content)
+```
+
+### Sanitization control
+
+By default, all exports are **automatically sanitized** to remove secrets (IPs, tokens, usernames, etc.). To export raw content without sanitization:
+
+```bash
+# Default: sanitized
+python3 scripts/agent-export.py --agent opencode --session <id> -o output.md
+
+# Raw: no sanitization
+python3 scripts/agent-export.py --agent opencode --session <id> --no-sanitize -o output.md
 ```
 
 ## Output
