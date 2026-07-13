@@ -1,53 +1,75 @@
 ---
 name: opencode-export-md
-description: Convert an `opencode export` JSON dump of a chat session into a readable Markdown transcript for sharing, review, or archival. Use when the user asks to export an opencode session, save a chat as Markdown, share a transcript, or convert session JSON to .md. Do not use for editing existing Markdown — that is the regular document workflow.
+description: Export AI coding agent sessions to Markdown. Supports OpenCode, MiMoCode, Claude Code, Aider, Codex, Cline, Cursor, and more. Use when the user asks to export any AI chat session, save conversations as Markdown, or share chat transcripts.
 ---
 
-# OpenCode session export to Markdown
+# AI Agent Session Export to Markdown
 
-Convert an `opencode export <sessionID>` JSON dump into a single Markdown file that preserves the conversation order and shows user / assistant messages, attached files, tool calls with inputs and outputs, and reasoning blocks.
+Export sessions from multiple AI coding agents to readable Markdown transcripts. Supports OpenCode, MiMoCode, Claude Code, Aider, Codex CLI, Cline/Roo Code, and Cursor.
 
 ## When to use
 
 - The user says "export this chat", "save the conversation as md", "дай экспорт чата", "скинь транскрипт".
-- The user wants to share or archive a specific opencode session as a standalone file.
-- The user has an `opencode export ... > chat.json` file and wants a `.md` next to it.
+- The user wants to share or archive a specific agent session as a standalone file.
+- The user wants to export sessions from any supported AI coding agent.
 
 Do not use when:
 
-- The user only wants to read a session back inside opencode — use `opencode --continue` or `opencode --session <id>`.
-- The session was exported with `--sanitize`; the textual content is already redacted and no Markdown export will recover it. Re-export without `--sanitize` first.
+- The user only wants to read a session back inside the agent — use the agent's native continue/resume.
+- The session was exported with `--sanitize`; the textual content is already redacted.
 
-## Inputs
+## Supported Agents
 
-| Input | How it is obtained |
-| --- | --- |
-| Session JSON | `opencode export <sessionID> > chat.json` (no `--sanitize` unless the user explicitly wants redaction) |
-| Session ID (current session) | `opencode session list` — pick the row matching the current task |
-| Session ID (non-interactive) | `opencode session list --max-count 1` (most recent) or filter by title |
+| Agent | Storage | Export Method |
+|-------|---------|---------------|
+| **OpenCode** | SQLite `~/.local/share/opencode/opencode.db` | CLI `opencode export` |
+| **MiMoCode** | SQLite `~/.local/share/mimocode/mimocode.db` | Direct DB read |
+| **Claude Code** | JSONL `~/.claude/projects/**/*.jsonl` | Direct file read |
+| **Aider** | Markdown `.aider.chat.history.md` | Direct file read |
+| **Codex CLI** | JSONL `~/.codex/sessions/**/rollout-*.jsonl` | Direct file read |
+| **Cline/Roo Code** | SQLite `~/.cline/data/sessions/` | Direct DB read |
+| **Cursor** | SQLite `~/.cursor/User/workspaceStorage/*/state.vscdb` | Direct DB read |
 
-`opencode export` writes the JSON to stdout and prepends one line `Exporting session: <id>`. The converter skips that line automatically.
+## Quick Start
 
-## Workflow
+### List sessions for an agent
+```bash
+python3 scripts/agent-export.py --agent opencode --list
+python3 scripts/agent-export.py --agent claude-code --list
+python3 scripts/agent-export.py --agent aider --list
+```
 
-1. Pick the session ID:
-   - Current session — the user knows it, or use `opencode session list` and confirm.
-   - Most recent — `opencode session list --max-count 1` and read the first `Session ID` column.
-2. Export the session:
+### Export a single session
+```bash
+python3 scripts/agent-export.py --agent opencode --session <id> -o output.md
+python3 scripts/agent-export.py --agent claude-code --session <id> -o output.md
+```
 
-   ```bash
-   opencode export <sessionID> > /tmp/opencode/chat-export.json
-   ```
+### Auto-detect agent from file
+```bash
+python3 scripts/agent-export.py --detect session.jsonl -o output.md
+```
 
-3. Convert to Markdown:
+### List all available adapters
+```bash
+python3 scripts/agent-export.py --agents
+```
 
-   ```bash
-   python3 ~/.agents/skills/opencode-export-md/scripts/opencode-md.py \
-       /tmp/opencode/chat-export.json \
-       -o /tmp/opencode/chat-export.md
-   ```
+## CLI Reference
 
-4. Hand the path back to the user. Default destination under `/tmp/opencode/` is fine; copy the file elsewhere only if the user asks.
+```
+agent-export.py [-h] [--agent AGENT | --detect FILE | --all]
+                [--session SESSION] [-o OUTPUT] [--list] [--agents]
+
+options:
+  --agent AGENT         agent name (opencode, mimocode, claude-code, aider, codex, cline, cursor)
+  --detect FILE         auto-detect agent from file content
+  --all                 bulk export all agents
+  --session SESSION     session ID to export
+  -o OUTPUT, --output OUTPUT  output path (file or directory)
+  --list                list available sessions
+  --agents              list available adapters
+```
 
 ## Output
 
@@ -108,9 +130,28 @@ Options: `--output`, `--converter`, `--repos-base`, `--db`, `--tmp-dir`. See `--
 - Reasoning blocks come back as `type: "reasoning"` parts; they are rendered as fenced code so they are visually distinct from regular prose.
 - File attachments (drag-and-drop, paste) appear as `type: "file"` parts with `filename` and `mime`. The Markdown output only lists the metadata; the bytes are not embedded.
 
+## Architecture
+
+```
+scripts/
+├── agent-export.py          # Main CLI entry point
+├── opencode-md.py           # Legacy single-agent converter
+└── agents/
+    ├── __init__.py          # Agent registry (auto-discovery)
+    ├── base.py              # Abstract AgentAdapter + NormalizedSession
+    ├── detector.py          # Auto-detection by content sniffing
+    ├── opencode.py          # OpenCode/MiMoCode adapter
+    ├── claude_code.py       # Claude Code adapter
+    ├── aider.py             # Aider adapter
+    ├── codex.py             # Codex CLI adapter
+    ├── cline.py             # Cline/Roo Code adapter
+    └── cursor.py            # Cursor adapter
+```
+
 ## Related
 
 - `opencode session list` — list session IDs and titles (filtered to current directory).
 - `opencode export --help` — flag reference; the only flag the skill cares about is `--sanitize` (avoid unless redacted output is wanted).
 - `opencode-md` in `~/.local/bin/` is a symlink shortcut to `scripts/opencode-md.py` if installed; otherwise call the script by full path.
 - `references/opencode-bulk-export.py` — batch export all sessions from the SQLite database.
+- `scripts/agent-export.py` — universal multi-agent session exporter.
